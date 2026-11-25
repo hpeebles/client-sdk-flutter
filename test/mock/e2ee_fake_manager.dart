@@ -94,6 +94,9 @@ class TestE2EEManager implements E2EEManager {
   BaseKeyProvider get keyProvider => _keyProvider;
 
   @override
+  Future<rtc.FrameCryptor?> attachSender(LocalTrack track, {required String identity}) async => null;
+
+  @override
   bool get isDataChannelEncryptionEnabled => _enabled && _dcEncryptionEnabled;
 
   @override

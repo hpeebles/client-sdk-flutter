@@ -20,13 +20,14 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../core/room.dart';
 import '../events.dart';
+import '../exceptions.dart';
 import '../extensions.dart';
 import '../logger.dart';
 import '../managers/event.dart';
+import '../track/local/local.dart';
 import '../utils.dart';
 import 'events.dart';
 import 'key_provider.dart';
-import 'options.dart';
 
 class E2EEManager {
   Room? _room;
@@ -48,18 +49,16 @@ class E2EEManager {
       _listener = _room!.createListener();
       _listener!
         ..on<LocalTrackPublishedEvent>((event) async {
-          if (event.publication.encryptionType == EncryptionType.kNone ||
-              isAV1Codec(event.publication.track?.codec ?? '')) {
-            // no need to setup frame cryptor
-            return;
-          }
-          final frameCryptor = await _addRtpSender(
-            sender: event.publication.track!.sender!,
-            identity: event.participant.identity,
-            sid: event.publication.sid,
-          );
-          if (kIsWeb && event.publication.track!.codec != null) {
-            await frameCryptor.updateCodec(event.publication.track!.codec!);
+          // Whatever the server's TrackInfo says: its encryption field is the
+          // server's to set, and a sender left without a cryptor sends in the
+          // clear. Normally the cryptor is attached already, before the
+          // track's negotiation ([attachSender]).
+          final track = event.publication.track;
+          if (track == null) return;
+          final frameCryptor = await attachSender(track, identity: event.participant.identity);
+          if (frameCryptor == null) return;
+          if (kIsWeb && track.codec != null) {
+            await frameCryptor.updateCodec(track.codec!);
           }
           frameCryptor.onFrameCryptorStateChanged = (trackId, state) {
             if (kDebugMode) {
@@ -76,8 +75,11 @@ class E2EEManager {
           };
         })
         ..on<LocalTrackUnpublishedEvent>((event) async {
+          final senderId = event.publication.track?.sender?.senderId;
           for (var key in _frameCryptors.keys.toList()) {
-            if (key.keys.first == event.participant.identity && key.values.first == event.publication.sid) {
+            if (key.keys.first == event.participant.identity &&
+                (key.values.first == event.publication.sid ||
+                    (senderId != null && key.values.first == _senderKey(senderId)))) {
               final frameCryptor = _frameCryptors.remove(key);
               await frameCryptor?.setEnabled(false);
               await frameCryptor?.dispose();
@@ -86,10 +88,11 @@ class E2EEManager {
         })
         ..on<TrackSubscribedEvent>((event) async {
           final codec = event.publication.mimeType.split('/')[1];
-          if (event.publication.encryptionType == EncryptionType.kNone || isAV1Codec(codec)) {
-            // no need to setup frame cryptor
-            return;
-          }
+          // Whatever the server's TrackInfo says, as for a sender: a track it
+          // calls unencrypted, or an AV1 one, gets a cryptor all the same, so
+          // nothing reaches the decoder that wasn't encrypted to this room's
+          // keys. The track was disabled when it arrived (see Room), and is
+          // enabled once its cryptor is in place.
           final frameCryptor = await _addRtpReceiver(
             receiver: event.track.receiver!,
             identity: event.participant.identity,
@@ -111,6 +114,7 @@ class E2EEManager {
               ),
             );
           };
+          event.track.mediaStreamTrack.enabled = true;
         })
         ..on<TrackUnsubscribedEvent>((event) async {
           for (var key in _frameCryptors.keys.toList()) {
@@ -151,10 +155,37 @@ class E2EEManager {
     _dataPacketCryptor = null;
   }
 
+  static String _senderKey(String senderId) => 'sender:$senderId';
+
+  /// Gives [track]'s sender a frame cryptor, before any of its media can
+  /// flow: [LocalParticipant] calls this as soon as the track's transceiver
+  /// exists, before the negotiation that starts its media, and again when it
+  /// is published, which finds the cryptor in place. `null` for a track with
+  /// no sender.
+  Future<FrameCryptor?> attachSender(LocalTrack track, {required String identity}) async {
+    final sender = track.transceiver?.sender;
+    if (sender == null) return null;
+    if (isAV1Codec(track.codec ?? '')) {
+      // Its packetizer needs the frames it is given in the clear.
+      throw LiveKitE2EEException('AV1 cannot be end-to-end encrypted');
+    }
+    final key = _senderKey(sender.senderId);
+    for (final entry in _frameCryptors.entries) {
+      if (entry.key.keys.first == identity && entry.key.values.first == key) {
+        return entry.value;
+      }
+    }
+    final frameCryptor = await _addRtpSender(sender: sender, identity: identity, key: key);
+    if (kIsWeb && track.codec != null) {
+      await frameCryptor.updateCodec(track.codec!);
+    }
+    return frameCryptor;
+  }
+
   Future<FrameCryptor> _addRtpSender({
     required RTCRtpSender sender,
     required String identity,
-    required String sid,
+    required String key,
   }) async {
     final frameCryptor = await frameCryptorFactory.createFrameCryptorForRtpSender(
       participantId: identity,
@@ -162,7 +193,7 @@ class E2EEManager {
       algorithm: _algorithm,
       keyProvider: _keyProvider.keyProvider,
     );
-    _frameCryptors[{identity: sid}] = frameCryptor;
+    _frameCryptors[{identity: key}] = frameCryptor;
     await frameCryptor.setEnabled(_enabled);
     logger.info('_addRtpSender, setKeyIndex: ${_keyProvider.getLatestIndex(identity)}');
     await frameCryptor.setKeyIndex(_keyProvider.getLatestIndex(identity));

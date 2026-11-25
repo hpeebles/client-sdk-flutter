@@ -584,7 +584,9 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
         await _getOrCreateRemoteParticipant(info);
       }
 
-      if (e2eeManager != null && event.response.sifTrailer.isNotEmpty) {
+      if (e2eeManager != null &&
+          e2eeManager!.keyProvider.acceptsServerSifTrailer &&
+          event.response.sifTrailer.isNotEmpty) {
         await e2eeManager!.keyProvider.setSifTrailer(Uint8List.fromList(event.response.sifTrailer));
       }
 
@@ -708,6 +710,12 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
     })
     ..on<EngineTrackAddedEvent>((event) async {
       logger.fine('EngineTrackAddedEvent trackSid:${event.track.id}');
+      // In an end-to-end encrypted room nothing plays until its cryptor is
+      // in place, which E2EEManager attaches on subscribe and then enables
+      // the track. A track never matched to a publication stays disabled.
+      if (_e2eeManager != null) {
+        event.track.enabled = false;
+      }
 
       final idParts = unpackStreamId(event.stream.id);
       final participantSid = idParts[0];

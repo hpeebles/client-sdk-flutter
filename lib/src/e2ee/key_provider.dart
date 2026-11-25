@@ -64,7 +64,13 @@ class BaseKeyProvider implements KeyProvider {
 
   Uint8List? get sharedKey => _sharedKey;
 
-  BaseKeyProvider(this._keyProvider, this.options);
+  /// Whether a room the provider is used in lets the server's SIF trailer
+  /// replace [rtc.KeyProviderOptions.uncryptedMagicBytes]. A frame ending in
+  /// those bytes is passed through undecrypted, so whoever knows them can
+  /// inject media: with this false, only the app's own bytes do.
+  final bool acceptsServerSifTrailer;
+
+  BaseKeyProvider(this._keyProvider, this.options, {this.acceptsServerSifTrailer = true});
 
   static Future<BaseKeyProvider> create({
     bool sharedKey = true,
@@ -74,6 +80,7 @@ class BaseKeyProvider implements KeyProvider {
     int? failureTolerance,
     int? keyRingSize,
     bool? discardFrameWhenCryptorNotReady,
+    bool acceptsServerSifTrailer = true,
   }) async {
     final rtc.KeyProviderOptions options = rtc.KeyProviderOptions(
       sharedKey: sharedKey,
@@ -85,7 +92,7 @@ class BaseKeyProvider implements KeyProvider {
       discardFrameWhenCryptorNotReady: discardFrameWhenCryptorNotReady ?? defaultDiscardFrameWhenCryptorNotReady,
     );
     final keyProvider = await rtc.frameCryptorFactory.createDefaultKeyProvider(options);
-    return BaseKeyProvider(keyProvider, options);
+    return BaseKeyProvider(keyProvider, options, acceptsServerSifTrailer: acceptsServerSifTrailer);
   }
 
   @override

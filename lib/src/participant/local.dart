@@ -199,6 +199,7 @@ class LocalParticipant extends Participant<LocalTrackPublication> {
 
       Future<lk_models.TrackInfo> negotiate(AudioPublishOptions options) async {
         track.transceiver = await room.engine.createTransceiverRTCRtpSender(track, options, encodings);
+        await room.e2eeManager?.attachSender(track, identity: identity);
         await room.engine.negotiate();
         return lk_models.TrackInfo();
       }
@@ -220,6 +221,7 @@ class LocalParticipant extends Participant<LocalTrackPublication> {
           kind: rtc.RTCRtpMediaType.RTCRtpMediaTypeAudio,
           init: transceiverInit,
         );
+        await room.e2eeManager?.attachSender(track, identity: identity);
 
         await room.engine.negotiate();
       }
@@ -387,6 +389,7 @@ class LocalParticipant extends Participant<LocalTrackPublication> {
       track.transceiver = await room.engine.createTransceiverRTCRtpSender(track, options, encodings);
 
       track.codec = options.videoCodec;
+      await room.e2eeManager?.attachSender(track, identity: identity);
       if (lkBrowser() != BrowserType.firefox) {
         await room.engine.setPreferredCodec(
           track.transceiver!,
@@ -489,6 +492,7 @@ class LocalParticipant extends Participant<LocalTrackPublication> {
       );
 
       track.codec = publishOptions.videoCodec;
+      await room.e2eeManager?.attachSender(track, identity: identity);
       if (lkBrowser() != BrowserType.firefox) {
         await room.engine.setPreferredCodec(
           track.transceiver!,
@@ -952,6 +956,9 @@ class LocalParticipant extends Participant<LocalTrackPublication> {
     if (publication.track is! LocalVideoTrack) {
       throw Exception('multi-codec simulcast is supported only for video');
     }
+    // An end-to-end encrypted room publishes no backup codec: its sender
+    // would have no cryptor.
+    if (room.e2eeManager != null) return;
     final track = publication.track as LocalVideoTrack;
 
     final backupCodecOpts = publication.backupVideoCodec;
