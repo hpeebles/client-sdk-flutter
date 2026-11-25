@@ -1491,7 +1491,12 @@ class Engine extends Disposable with EventsEmittable<EngineEvent> {
       }
       logger.fine('received answer (type: ${event.sd.type})');
       logger.finer('sdp: ${event.sd.sdp}');
-      await publisher!.setRemoteDescription(event.sd);
+      // Encrypted, a voice's packet sizes are all that's left to read it
+      // by, and Opus's variable bitrate gives them away: the answer is what
+      // the sender's encoder takes its bitrate mode from.
+      await publisher!.setRemoteDescription(
+        e2eeManager != null ? withConstantBitrateOpus(event.sd) : event.sd,
+      );
     })
     ..on<SignalTrickleEvent>((event) async {
       if (publisher == null || subscriber == null) {

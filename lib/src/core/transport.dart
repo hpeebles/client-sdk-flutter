@@ -15,6 +15,7 @@
 import 'dart:async';
 
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
+import 'package:meta/meta.dart';
 import 'package:sdp_transform/sdp_transform.dart' as sdp_transform;
 
 import '../exceptions.dart';
@@ -59,6 +60,38 @@ typedef PeerConnectionCreate =
     Future<rtc.RTCPeerConnection> Function(Map<String, dynamic> configuration, [Map<String, dynamic> constraints]);
 
 /// a wrapper around PeerConnection
+/// [sd] with every Opus payload's format parameters asking for a constant
+/// bitrate and no discontinuous transmission (`cbr=1`, `usedtx=0`), which a
+/// sender's encoder takes from the remote description.
+@internal
+rtc.RTCSessionDescription withConstantBitrateOpus(rtc.RTCSessionDescription sd) {
+  final parsed = sdp_transform.parse(sd.sdp ?? '');
+  for (final media in (parsed['media'] as List? ?? const [])) {
+    if (media['type'] != 'audio') continue;
+    final opus = <dynamic>{
+      for (final rtp in (media['rtp'] as List? ?? const []))
+        if ((rtp['codec'] as String?)?.toLowerCase() == 'opus') rtp['payload'],
+    };
+    for (final payload in opus) {
+      final fmtps = (media['fmtp'] as List?) ?? (media['fmtp'] = <dynamic>[]);
+      var fmtp = fmtps.firstWhere((f) => f['payload'] == payload, orElse: () => null);
+      if (fmtp == null) {
+        fmtp = {'payload': payload, 'config': ''};
+        fmtps.add(fmtp);
+      }
+      final params =
+          (fmtp['config'] as String)
+              .split(';')
+              .map((p) => p.trim())
+              .where((p) => p.isNotEmpty && !p.startsWith('cbr=') && !p.startsWith('usedtx='))
+              .toList()
+            ..addAll(['cbr=1', 'usedtx=0']);
+      fmtp['config'] = params.join(';');
+    }
+  }
+  return rtc.RTCSessionDescription(sdp_transform.write(parsed, null), sd.type);
+}
+
 class Transport extends Disposable {
   final rtc.RTCPeerConnection pc;
   final List<rtc.RTCIceCandidate> _pendingCandidates = [];
