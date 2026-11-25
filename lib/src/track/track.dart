@@ -145,10 +145,32 @@ abstract class Track extends DisposableChangeNotifier with EventsEmittable<Track
     return true;
   }
 
+  /// What [enable] and [disable] last asked for, which [releaseCryptorHold]
+  /// puts back.
+  bool _enabledByApp = true;
+  bool _heldForCryptor = false;
+
+  /// Keeps an end-to-end encrypted room's remote track silent and blank
+  /// until its frame cryptor is in place: what plays before it would play in
+  /// the clear. [enable] can't lift it.
+  @internal
+  void holdForCryptor() {
+    _heldForCryptor = true;
+    mediaStreamTrack.enabled = false;
+  }
+
+  /// Lifts [holdForCryptor], to whatever [enable] or [disable] last asked.
+  @internal
+  void releaseCryptorHold() {
+    _heldForCryptor = false;
+    mediaStreamTrack.enabled = _enabledByApp;
+  }
+
   Future<void> enable() async {
     logger.fine('$objectId.enable() enabling ${mediaStreamTrack.objectId}...');
+    _enabledByApp = true;
     try {
-      if (_active) {
+      if (_active && !_heldForCryptor) {
         mediaStreamTrack.enabled = true;
       }
     } catch (e) {
@@ -158,6 +180,7 @@ abstract class Track extends DisposableChangeNotifier with EventsEmittable<Track
 
   Future<void> disable() async {
     logger.fine('$objectId.disable() disabling ${mediaStreamTrack.objectId}...');
+    _enabledByApp = false;
     try {
       if (_active) {
         mediaStreamTrack.enabled = false;

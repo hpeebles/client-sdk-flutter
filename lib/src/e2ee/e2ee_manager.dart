@@ -91,8 +91,8 @@ class E2EEManager {
           // Whatever the server's TrackInfo says, as for a sender: a track it
           // calls unencrypted, or an AV1 one, gets a cryptor all the same, so
           // nothing reaches the decoder that wasn't encrypted to this room's
-          // keys. The track was disabled when it arrived (see Room), and is
-          // enabled once its cryptor is in place.
+          // keys. The track was held silent when it arrived (see Room and
+          // RemoteParticipant), until its cryptor is in place.
           final frameCryptor = await _addRtpReceiver(
             receiver: event.track.receiver!,
             identity: event.participant.identity,
@@ -114,7 +114,7 @@ class E2EEManager {
               ),
             );
           };
-          event.track.mediaStreamTrack.enabled = true;
+          event.track.releaseCryptorHold();
         })
         ..on<TrackUnsubscribedEvent>((event) async {
           for (var key in _frameCryptors.keys.toList()) {

@@ -241,6 +241,11 @@ class RemoteParticipant extends Participant<RemoteTrackPublication> {
       }
     }
 
+    // Released by E2EEManager once the track's cryptor is in place.
+    if (room.e2eeManager != null) {
+      track.holdForCryptor();
+    }
+
     await pub.updateTrack(track);
     await pub.updateSubscriptionAllowed(true);
     addTrackPublication(pub);
